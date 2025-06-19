@@ -4,11 +4,6 @@
 
 This project demonstrates a working cross-chain arbitrage strategy between USDC and USDT, starting from Avalanche. Profit is measured in USDC on Avalanche. The script is written in TypeScript using `viem` and is designed for both dry-run simulation and real execution (with a switch).
 
-## 🎯 Main Goal
-
-- Build and demonstrate a working cross-chain arbitrage strategy between USDC and USDT, starting from Avalanche.
-- Profit is measured in USDC on Avalanche.
-
 ## 🛠️ How the Script Works
 
 - **Monitors USDC/USDT prices** on Pharaoh (Avalanche) and Shadow (Sonic) concentrated liquidity pools.
@@ -156,11 +151,3 @@ describe("getPriceFromSqrtPriceX96BigInt", () => {
 npm install --save-dev jest ts-jest @types/jest
 npx jest
 ```
-
-## ✅ Current Status
-
-- **Dry-run simulation is fully supported.**
-- **All requirements from the main goal are met.**
-- **Code is ready for real execution with minimal changes.**
-
-**For any questions or to run in live mode, review the code and set `LIVE_MODE = true` after implementing the real contract logic.**
