@@ -299,6 +299,10 @@ async function mockCcipBridge({
   return { amountReceived: amount - simulatedCost, txHash: "0xmockccip" };
 }
 
+// --- USDT Bridging ---
+// We use Stargate for USDT bridging due to its deep liquidity, low cost, and broad support across chains.
+// For production, replace `mockStargateBridge` with a real Stargate integration (see realStargateBridge stub below).
+
 async function mockStargateBridge({
   fromChain,
   toChain,
@@ -314,6 +318,7 @@ async function mockStargateBridge({
   simulatedCost?: number;
   simulatedDelay?: number;
 }) {
+  // [MOCK] This function simulates a Stargate bridge. For real execution, implement realStargateBridge below.
   const logMsg = `[BRIDGE][Stargate] Initiating Stargate bridge for ${amount} ${getSymbol(
     token
   )} from ${fromChain} to ${toChain}...\n  Simulated cost: $${simulatedCost}, estimated time: ${
@@ -349,6 +354,7 @@ async function mockSwap({
   fee: number;
   simulatedSlippage?: number;
 }) {
+  // [MOCK] This function simulates a swap. For real execution, implement realSwap below.
   const decimals = 6;
   const amountInBN = bn(amountIn, decimals);
   const priceBN = bn(price, decimals);
@@ -407,12 +413,10 @@ async function realSwap({
   slippage: number;
   chain: string;
   wallet: any;
-}) {
+}): Promise<never> {
   try {
-    // TODO: Approve router for fromToken if needed
-    // TODO: Build calldata for Uniswap V3 Universal Router or SwapRouter02
-    // TODO: Use viem.sendTransaction with wallet and router address
-    // TODO: Wait for tx confirmation and return tx hash and amountOut
+    // TODO: Implement real swap logic here. Approve router, build calldata, send transaction, wait for confirmation.
+    // See Uniswap V3/Universal Router docs: https://docs.uniswap.org/
     throw new Error("realSwap not implemented");
   } catch (err) {
     // Robust error handling and retry logic for production
@@ -433,11 +437,10 @@ async function realCcipBridge({
   amount: bigint;
   token: string;
   wallet: any;
-}) {
+}): Promise<never> {
   try {
-    // TODO: Build and send CCIP message using RouterClient
-    // TODO: Pay LINK fee if required
-    // TODO: Wait for message confirmation and return tx hash and amountOut
+    // TODO: Implement real CCIP bridge logic here. Build and send CCIP message using RouterClient, pay LINK fee if required.
+    // See Chainlink CCIP docs: https://docs.chain.link/ccip
     throw new Error("realCcipBridge not implemented");
   } catch (err) {
     console.error(`[realCcipBridge] Error:`, err);
@@ -457,10 +460,10 @@ async function realStargateBridge({
   amount: bigint;
   token: string;
   wallet: any;
-}) {
+}): Promise<never> {
   try {
-    // TODO: Build and send Stargate bridge tx
-    // TODO: Wait for confirmation and return tx hash and amountOut
+    // TODO: Implement real Stargate bridge logic here. Build and send Stargate bridge tx, wait for confirmation.
+    // See Stargate docs: https://stargate.finance/docs
     throw new Error("realStargateBridge not implemented");
   } catch (err) {
     console.error(`[realStargateBridge] Error:`, err);
@@ -474,43 +477,86 @@ async function simulateExecution(
   pharaoh: any,
   shadow: any
 ) {
+  if (!LIVE_MODE) {
+    console.log(
+      "[DRY RUN] All swaps and bridges are simulated. Set LIVE_MODE=true in config for real execution."
+    );
+  }
   if (direction === "USDC") {
     // USDC (Avalanche) -> USDT (Pharaoh) -> USDT (Sonic) -> USDC (Shadow) -> USDC (Avalanche)
     let usdc = START_USDC;
     // 1. Swap USDC->USDT on Pharaoh (Avalanche)
-    const swap1 = await mockSwap({
-      dex: "Pharaoh",
-      chain: "Avalanche",
-      fromToken: USDC,
-      toToken: USDT,
-      amountIn: usdc,
-      price: pharaoh.price,
-      fee: FEES.PHARAOH,
-    });
+    const swap1 = LIVE_MODE
+      ? await realSwap({
+          router: ROUTERS.PHARAOH,
+          fromToken: USDC,
+          toToken: USDT,
+          amountIn: bn(usdc, 6),
+          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          slippage: 0.001,
+          chain: "Avalanche",
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockSwap({
+          dex: "Pharaoh",
+          chain: "Avalanche",
+          fromToken: USDC,
+          toToken: USDT,
+          amountIn: usdc,
+          price: pharaoh.price,
+          fee: FEES.PHARAOH,
+        });
     // 2. Bridge USDT to Sonic (Stargate)
-    const bridge1 = await mockStargateBridge({
-      fromChain: "Avalanche",
-      toChain: "Sonic",
-      amount: swap1.amountOut,
-      token: USDT,
-    });
+    const bridge1 = LIVE_MODE
+      ? await realStargateBridge({
+          fromChain: "Avalanche",
+          toChain: "Sonic",
+          amount: bn(swap1.amountOut, 6),
+          token: USDT,
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockStargateBridge({
+          fromChain: "Avalanche",
+          toChain: "Sonic",
+          amount: swap1.amountOut,
+          token: USDT,
+        });
     // 3. Swap USDT->USDC on Shadow (Sonic)
-    const swap2 = await mockSwap({
-      dex: "Shadow",
-      chain: "Sonic",
-      fromToken: USDT,
-      toToken: USDC,
-      amountIn: bridge1.amountReceived,
-      price: shadow.price,
-      fee: FEES.SHADOW,
-    });
+    const swap2 = LIVE_MODE
+      ? await realSwap({
+          router: ROUTERS.SHADOW,
+          fromToken: USDT,
+          toToken: USDC,
+          amountIn: bn(bridge1.amountReceived, 6),
+          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          slippage: 0.001,
+          chain: "Sonic",
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockSwap({
+          dex: "Shadow",
+          chain: "Sonic",
+          fromToken: USDT,
+          toToken: USDC,
+          amountIn: bridge1.amountReceived,
+          price: shadow.price,
+          fee: FEES.SHADOW,
+        });
     // 4. Bridge USDC back to Avalanche (CCIP)
-    const bridge2 = await mockCcipBridge({
-      fromChain: "Sonic",
-      toChain: "Avalanche",
-      amount: swap2.amountOut,
-      token: USDC,
-    });
+    const bridge2 = LIVE_MODE
+      ? await realCcipBridge({
+          fromChain: "Sonic",
+          toChain: "Avalanche",
+          amount: bn(swap2.amountOut, 6),
+          token: USDC,
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockCcipBridge({
+          fromChain: "Sonic",
+          toChain: "Avalanche",
+          amount: swap2.amountOut,
+          token: USDC,
+        });
     // 5. Log final result
     console.log(
       `[EXECUTION][USDC] Round-trip complete. Started with ${START_USDC} USDC, ended with ${
@@ -523,39 +569,77 @@ async function simulateExecution(
     // USDT (Avalanche) -> USDC (Pharaoh) -> USDC (Sonic) -> USDT (Shadow) -> USDT (Avalanche)
     let usdt = START_USDC;
     // 1. Swap USDT->USDC on Pharaoh (Avalanche)
-    const swap1 = await mockSwap({
-      dex: "Pharaoh",
-      chain: "Avalanche",
-      fromToken: USDT,
-      toToken: USDC,
-      amountIn: usdt,
-      price: pharaoh.price,
-      fee: FEES.PHARAOH,
-    });
+    const swap1 = LIVE_MODE
+      ? await realSwap({
+          router: ROUTERS.PHARAOH,
+          fromToken: USDT,
+          toToken: USDC,
+          amountIn: bn(usdt, 6),
+          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          slippage: 0.001,
+          chain: "Avalanche",
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockSwap({
+          dex: "Pharaoh",
+          chain: "Avalanche",
+          fromToken: USDT,
+          toToken: USDC,
+          amountIn: usdt,
+          price: pharaoh.price,
+          fee: FEES.PHARAOH,
+        });
     // 2. Bridge USDC to Sonic (CCIP)
-    const bridge1 = await mockCcipBridge({
-      fromChain: "Avalanche",
-      toChain: "Sonic",
-      amount: swap1.amountOut,
-      token: USDC,
-    });
+    const bridge1 = LIVE_MODE
+      ? await realCcipBridge({
+          fromChain: "Avalanche",
+          toChain: "Sonic",
+          amount: bn(swap1.amountOut, 6),
+          token: USDC,
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockCcipBridge({
+          fromChain: "Avalanche",
+          toChain: "Sonic",
+          amount: swap1.amountOut,
+          token: USDC,
+        });
     // 3. Swap USDC->USDT on Shadow (Sonic)
-    const swap2 = await mockSwap({
-      dex: "Shadow",
-      chain: "Sonic",
-      fromToken: USDC,
-      toToken: USDT,
-      amountIn: bridge1.amountReceived,
-      price: shadow.price,
-      fee: FEES.SHADOW,
-    });
+    const swap2 = LIVE_MODE
+      ? await realSwap({
+          router: ROUTERS.SHADOW,
+          fromToken: USDC,
+          toToken: USDT,
+          amountIn: bn(bridge1.amountReceived, 6),
+          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          slippage: 0.001,
+          chain: "Sonic",
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockSwap({
+          dex: "Shadow",
+          chain: "Sonic",
+          fromToken: USDC,
+          toToken: USDT,
+          amountIn: bridge1.amountReceived,
+          price: shadow.price,
+          fee: FEES.SHADOW,
+        });
     // 4. Bridge USDT back to Avalanche (Stargate)
-    const bridge2 = await mockStargateBridge({
-      fromChain: "Sonic",
-      toChain: "Avalanche",
-      amount: swap2.amountOut,
-      token: USDT,
-    });
+    const bridge2 = LIVE_MODE
+      ? await realStargateBridge({
+          fromChain: "Sonic",
+          toChain: "Avalanche",
+          amount: bn(swap2.amountOut, 6),
+          token: USDT,
+          wallet: WALLET_PRIVATE_KEY,
+        })
+      : await mockStargateBridge({
+          fromChain: "Sonic",
+          toChain: "Avalanche",
+          amount: swap2.amountOut,
+          token: USDT,
+        });
     // 5. Log final result
     console.log(
       `[EXECUTION][USDT] Round-trip complete. Started with ${START_USDC} USDT, ended with ${
@@ -640,6 +724,11 @@ async function simulateArbitrage() {
 
 // Main loop
 async function main() {
+  if (!LIVE_MODE) {
+    console.log(
+      "[WARNING] Running in DRY RUN mode. No real swaps or bridges will be executed."
+    );
+  }
   while (true) {
     await simulateArbitrage();
     await new Promise((r) => setTimeout(r, 10000)); // Poll every 10s
