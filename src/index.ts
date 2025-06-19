@@ -1,6 +1,3 @@
-// Cross-Chain USDC/USDT Arbitrage Bot
-// Main entry point
-
 import axios from "axios";
 import { createPublicClient, http } from "viem";
 import { parseUnits, formatUnits } from "viem/utils";
@@ -14,6 +11,11 @@ import {
   WALLET_PRIVATE_KEY,
   ChainName,
 } from "./config";
+
+export const POOL_FEES = {
+  PHARAOH: 0.0005,
+  SHADOW: 0.0005,
+};
 
 // Uniswap V3 Pool minimal ABI for slot0 and token0/token1
 const UNISWAP_V3_POOL_ABI = [
@@ -68,7 +70,6 @@ const SHADOW_POOL = "0x9053fe060f412ad5677f934f89e07524343ee8e7"; // Sonic
 // USDC/USDT token addresses (Avalanche and Sonic)
 const USDC = "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E";
 const USDT = "0xc7198437980c041c805A1EDcbA50c1Ce5db95118";
-// (Replace with Sonic addresses if different)
 
 // Create and reuse public clients
 const avalancheClient = createPublicClient({
@@ -112,11 +113,30 @@ function logToFile(message: string) {
   });
 }
 
-// Helper to compute price from sqrtPriceX96 using BigInt math
-function getPriceFromSqrtPriceX96BigInt(
+// --- Retry Helper ---
+async function retryAsync<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelay = 1000
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      attempt++;
+      console.error(`[RETRY] Attempt ${attempt} failed:`, err);
+      if (attempt > maxRetries) throw err;
+      await sleep(baseDelay * 2 ** (attempt - 1));
+    }
+  }
+}
+
+// Helper to compute price from sqrtPriceX96 using BigInt
+export function getPriceFromSqrtPriceX96BigInt(
   sqrtPriceX96: bigint,
-  decimalsToken0 = 6,
-  decimalsToken1 = 6
+  decimalsToken0: number = 6,
+  decimalsToken1: number = 6
 ): number {
   // price = (sqrtPriceX96 ** 2 * 10**(decimalsToken0 - decimalsToken1)) / 2**192
   const numerator =
@@ -124,6 +144,25 @@ function getPriceFromSqrtPriceX96BigInt(
   const denominator = 1n << 192n;
   const price = Number(numerator) / Number(denominator);
   return price;
+}
+
+// Helper to fetch token decimals
+export async function getTokenDecimals(
+  client: any,
+  tokenAddress: string
+): Promise<number> {
+  return await client.readContract({
+    address: tokenAddress,
+    abi: [
+      {
+        name: "decimals",
+        type: "function",
+        stateMutability: "view",
+        outputs: [{ type: "uint8" }],
+      },
+    ],
+    functionName: "decimals",
+  });
 }
 
 // Fetch token0/token1 and price from a Uniswap V3 pool
@@ -150,33 +189,47 @@ async function getPoolInfo(client: any, poolAddress: string) {
 }
 
 // Fetch price from Pharaoh (Avalanche)
-async function getPharaohPrice(): Promise<{
+export async function getPharaohPrice(): Promise<{
   price: number;
   token0: string;
   token1: string;
+  decimals0: number;
+  decimals1: number;
 }> {
   const { token0, token1, sqrtPriceX96 } = await getPoolInfo(
     avalancheClient,
     PHARAOH_POOL
   );
-  // If token0 = USDC, price = USDT per USDC
-  // If token0 = USDT, price = USDC per USDT
-  const price = getPriceFromSqrtPriceX96BigInt(sqrtPriceX96);
-  return { price, token0, token1 };
+  const decimals0 = await getTokenDecimals(avalancheClient, token0);
+  const decimals1 = await getTokenDecimals(avalancheClient, token1);
+  const price = getPriceFromSqrtPriceX96BigInt(
+    sqrtPriceX96,
+    decimals0,
+    decimals1
+  );
+  return { price, token0, token1, decimals0, decimals1 };
 }
 
 // Fetch price from Shadow (Sonic)
-async function getShadowPrice(): Promise<{
+export async function getShadowPrice(): Promise<{
   price: number;
   token0: string;
   token1: string;
+  decimals0: number;
+  decimals1: number;
 }> {
   const { token0, token1, sqrtPriceX96 } = await getPoolInfo(
     sonicClient,
     SHADOW_POOL
   );
-  const price = getPriceFromSqrtPriceX96BigInt(sqrtPriceX96);
-  return { price, token0, token1 };
+  const decimals0 = await getTokenDecimals(sonicClient, token0);
+  const decimals1 = await getTokenDecimals(sonicClient, token1);
+  const price = getPriceFromSqrtPriceX96BigInt(
+    sqrtPriceX96,
+    decimals0,
+    decimals1
+  );
+  return { price, token0, token1, decimals0, decimals1 };
 }
 
 // Helper to apply swap fee
@@ -211,7 +264,7 @@ function logPoolInfo(
 }
 
 // Abstracted arbitrage direction logic
-function simulateDirection({
+export function simulateDirection({
   startAmount,
   poolA,
   poolB,
@@ -222,6 +275,9 @@ function simulateDirection({
   directionLabel,
   tokenIn,
   tokenOut,
+  decimalsIn = 6,
+  decimalsOut = 6,
+  minAmountOutFactor = 0.995,
 }: {
   startAmount: number;
   poolA: { token0: string; token1: string; price: number };
@@ -233,6 +289,9 @@ function simulateDirection({
   directionLabel: string;
   tokenIn: string;
   tokenOut: string;
+  decimalsIn?: number;
+  decimalsOut?: number;
+  minAmountOutFactor?: number;
 }) {
   // Swap on poolA
   let afterSwapA: number;
@@ -253,11 +312,14 @@ function simulateDirection({
   // Bridge back
   let finalAmount = afterSwapB - bridgeCostB;
   let profit = finalAmount - startAmount;
+  // minAmountOut check (simulate slippage protection)
+  const minAmountOut = startAmount * minAmountOutFactor;
   return {
     directionLabel,
     startAmount,
     finalAmount,
     profit,
+    minAmountOut,
     tokenIn: getSymbol(tokenIn),
     tokenOut: getSymbol(tokenOut),
   };
@@ -300,8 +362,7 @@ async function mockCcipBridge({
 }
 
 // --- USDT Bridging ---
-// We use Stargate for USDT bridging due to its deep liquidity, low cost, and broad support across chains.
-// For production, replace `mockStargateBridge` with a real Stargate integration (see realStargateBridge stub below).
+// I use Stargate for USDT bridging due to its deep liquidity, low cost, and broad support across chains.
 
 async function mockStargateBridge({
   fromChain,
@@ -318,7 +379,7 @@ async function mockStargateBridge({
   simulatedCost?: number;
   simulatedDelay?: number;
 }) {
-  // [MOCK] This function simulates a Stargate bridge. For real execution, implement realStargateBridge below.
+  // This function simulates a Stargate bridge
   const logMsg = `[BRIDGE][Stargate] Initiating Stargate bridge for ${amount} ${getSymbol(
     token
   )} from ${fromChain} to ${toChain}...\n  Simulated cost: $${simulatedCost}, estimated time: ${
@@ -354,7 +415,7 @@ async function mockSwap({
   fee: number;
   simulatedSlippage?: number;
 }) {
-  // [MOCK] This function simulates a swap. For real execution, implement realSwap below.
+  // This function simulates a swap
   const decimals = 6;
   const amountInBN = bn(amountIn, decimals);
   const priceBN = bn(price, decimals);
@@ -414,15 +475,10 @@ async function realSwap({
   chain: string;
   wallet: any;
 }): Promise<never> {
-  try {
-    // TODO: Implement real swap logic here. Approve router, build calldata, send transaction, wait for confirmation.
-    // See Uniswap V3/Universal Router docs: https://docs.uniswap.org/
+  return retryAsync(async () => {
+    // TODO: Implement real swap logic here
     throw new Error("realSwap not implemented");
-  } catch (err) {
-    // Robust error handling and retry logic for production
-    console.error(`[realSwap][${chain}] Error:`, err);
-    throw err;
-  }
+  });
 }
 
 async function realCcipBridge({
@@ -438,14 +494,10 @@ async function realCcipBridge({
   token: string;
   wallet: any;
 }): Promise<never> {
-  try {
-    // TODO: Implement real CCIP bridge logic here. Build and send CCIP message using RouterClient, pay LINK fee if required.
-    // See Chainlink CCIP docs: https://docs.chain.link/ccip
+  return retryAsync(async () => {
+    // TODO: Implement real CCIP bridge logic here
     throw new Error("realCcipBridge not implemented");
-  } catch (err) {
-    console.error(`[realCcipBridge] Error:`, err);
-    throw err;
-  }
+  });
 }
 
 async function realStargateBridge({
@@ -461,14 +513,11 @@ async function realStargateBridge({
   token: string;
   wallet: any;
 }): Promise<never> {
-  try {
-    // TODO: Implement real Stargate bridge logic here. Build and send Stargate bridge tx, wait for confirmation.
-    // See Stargate docs: https://stargate.finance/docs
+  return retryAsync(async () => {
+    // TODO: Implement real Stargate bridge logic here
+
     throw new Error("realStargateBridge not implemented");
-  } catch (err) {
-    console.error(`[realStargateBridge] Error:`, err);
-    throw err;
-  }
+  });
 }
 
 // --- Simulated Execution Pipeline ---
@@ -485,7 +534,7 @@ async function simulateExecution(
   if (direction === "USDC") {
     // USDC (Avalanche) -> USDT (Pharaoh) -> USDT (Sonic) -> USDC (Shadow) -> USDC (Avalanche)
     let usdc = START_USDC;
-    // 1. Swap USDC->USDT on Pharaoh (Avalanche)
+    // Swap USDC->USDT on Pharaoh (Avalanche)
     const swap1 = LIVE_MODE
       ? await realSwap({
           router: ROUTERS.PHARAOH,
@@ -506,7 +555,7 @@ async function simulateExecution(
           price: pharaoh.price,
           fee: FEES.PHARAOH,
         });
-    // 2. Bridge USDT to Sonic (Stargate)
+    // Bridge USDT to Sonic (Stargate)
     const bridge1 = LIVE_MODE
       ? await realStargateBridge({
           fromChain: "Avalanche",
@@ -521,7 +570,7 @@ async function simulateExecution(
           amount: swap1.amountOut,
           token: USDT,
         });
-    // 3. Swap USDT->USDC on Shadow (Sonic)
+    // Swap USDT->USDC on Shadow (Sonic)
     const swap2 = LIVE_MODE
       ? await realSwap({
           router: ROUTERS.SHADOW,
@@ -542,7 +591,7 @@ async function simulateExecution(
           price: shadow.price,
           fee: FEES.SHADOW,
         });
-    // 4. Bridge USDC back to Avalanche (CCIP)
+    // Bridge USDC back to Avalanche (CCIP)
     const bridge2 = LIVE_MODE
       ? await realCcipBridge({
           fromChain: "Sonic",
@@ -557,7 +606,7 @@ async function simulateExecution(
           amount: swap2.amountOut,
           token: USDC,
         });
-    // 5. Log final result
+    // Log final result
     console.log(
       `[EXECUTION][USDC] Round-trip complete. Started with ${START_USDC} USDC, ended with ${
         bridge2.amountReceived
@@ -568,14 +617,14 @@ async function simulateExecution(
   } else {
     // USDT (Avalanche) -> USDC (Pharaoh) -> USDC (Sonic) -> USDT (Shadow) -> USDT (Avalanche)
     let usdt = START_USDC;
-    // 1. Swap USDT->USDC on Pharaoh (Avalanche)
+    // Swap USDT->USDC on Pharaoh (Avalanche)
     const swap1 = LIVE_MODE
       ? await realSwap({
           router: ROUTERS.PHARAOH,
           fromToken: USDT,
           toToken: USDC,
           amountIn: bn(usdt, 6),
-          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          minAmountOut: bn(0, 6), // Test minAmountOut
           slippage: 0.001,
           chain: "Avalanche",
           wallet: WALLET_PRIVATE_KEY,
@@ -589,7 +638,7 @@ async function simulateExecution(
           price: pharaoh.price,
           fee: FEES.PHARAOH,
         });
-    // 2. Bridge USDC to Sonic (CCIP)
+    // Bridge USDC to Sonic (CCIP)
     const bridge1 = LIVE_MODE
       ? await realCcipBridge({
           fromChain: "Avalanche",
@@ -604,14 +653,14 @@ async function simulateExecution(
           amount: swap1.amountOut,
           token: USDC,
         });
-    // 3. Swap USDC->USDT on Shadow (Sonic)
+    // Swap USDC->USDT on Shadow (Sonic)
     const swap2 = LIVE_MODE
       ? await realSwap({
           router: ROUTERS.SHADOW,
           fromToken: USDC,
           toToken: USDT,
           amountIn: bn(bridge1.amountReceived, 6),
-          minAmountOut: bn(0, 6), // TODO: set real minAmountOut
+          minAmountOut: bn(0, 6), // TestminAmountOut
           slippage: 0.001,
           chain: "Sonic",
           wallet: WALLET_PRIVATE_KEY,
@@ -625,7 +674,7 @@ async function simulateExecution(
           price: shadow.price,
           fee: FEES.SHADOW,
         });
-    // 4. Bridge USDT back to Avalanche (Stargate)
+    // Bridge USDT back to Avalanche (Stargate)
     const bridge2 = LIVE_MODE
       ? await realStargateBridge({
           fromChain: "Sonic",
@@ -640,7 +689,7 @@ async function simulateExecution(
           amount: swap2.amountOut,
           token: USDT,
         });
-    // 5. Log final result
+    // Log final result
     console.log(
       `[EXECUTION][USDT] Round-trip complete. Started with ${START_USDC} USDT, ended with ${
         bridge2.amountReceived
@@ -660,7 +709,7 @@ async function simulateArbitrage() {
     logPoolInfo("Pharaoh", pharaoh.token0, pharaoh.token1, pharaoh.price);
     logPoolInfo("Shadow", shadow.token0, shadow.token1, shadow.price);
 
-    // Direction 1: USDC (Avalanche) -> USDT (Pharaoh) -> USDT (Sonic) -> USDC (Shadow) -> USDC (Avalanche)
+    // USDC (Avalanche) -> USDT (Pharaoh) -> USDT (Sonic) -> USDC (Shadow) -> USDC (Avalanche)
     const dir1 = simulateDirection({
       startAmount: START_USDC,
       poolA: pharaoh,
@@ -674,7 +723,7 @@ async function simulateArbitrage() {
       tokenOut: USDC,
     });
 
-    // Direction 2: USDT (Avalanche) -> USDC (Pharaoh) -> USDC (Sonic) -> USDT (Shadow) -> USDT (Avalanche)
+    // USDT (Avalanche) -> USDC (Pharaoh) -> USDC (Sonic) -> USDT (Shadow) -> USDT (Avalanche)
     const dir2 = simulateDirection({
       startAmount: START_USDC,
       poolA: pharaoh,

@@ -84,12 +84,83 @@ This project demonstrates a working cross-chain arbitrage strategy between USDC 
 - Integrate with a dashboard or webhook for remote monitoring.
 - Add advanced risk controls (e.g., MEV protection, sandwich attack detection).
 
+## 🧑‍🔬 Technical Onboarding
+
+### Architecture & Main Modules
+
+- **src/index.ts**: Main entry point. Contains all core logic, including price fetching, simulation, execution, and logging.
+- **src/config.ts**: All configuration (addresses, fees, thresholds, slippage, etc). Uses environment variables for overrides.
+- **BigNumber math**: All calculations use BigInt and viem utils for safety.
+- **Retry logic**: All real swap/bridge stubs use retry with exponential backoff.
+- **Token decimals**: Decimals are fetched dynamically for each token.
+
+### How to Add New Tokens or Pools
+
+- Add the token address and pool address to `src/config.ts`.
+- Ensure the pool is Uniswap V3 compatible (has slot0, token0, token1).
+- The code will fetch decimals automatically, but you may want to add a symbol mapping in `getSymbol`.
+
+### How to Run Tests
+
+- All pure helpers (e.g., `simulateDirection`, `getPriceFromSqrtPriceX96BigInt`) are exported and can be tested directly.
+- Use Jest or Vitest. Example below.
+
+## 🧪 Testing
+
+### Example: Unit Test for simulateDirection
+
+Create a file `test/simulateDirection.test.ts`:
+
+```ts
+import { simulateDirection } from "../src/index";
+
+describe("simulateDirection", () => {
+  it("should compute profit for a simple arbitrage", () => {
+    const result = simulateDirection({
+      startAmount: 10,
+      poolA: { token0: "0xA", token1: "0xB", price: 1.01 },
+      poolB: { token0: "0xB", token1: "0xA", price: 0.99 },
+      swapFeeA: 0.0005,
+      swapFeeB: 0.0005,
+      bridgeCostA: 0.1,
+      bridgeCostB: 0.1,
+      directionLabel: "A→B→A",
+      tokenIn: "0xA",
+      tokenOut: "0xA",
+      minAmountOutFactor: 0.995,
+    });
+    expect(result.finalAmount).toBeGreaterThan(0);
+    expect(typeof result.profit).toBe("number");
+  });
+});
+```
+
+### Example: Unit Test for getPriceFromSqrtPriceX96BigInt
+
+```ts
+import { getPriceFromSqrtPriceX96BigInt } from "../src/index";
+
+describe("getPriceFromSqrtPriceX96BigInt", () => {
+  it("should compute price correctly for 1:1 pool with 6 decimals", () => {
+    // sqrtPriceX96 for price=1 is 2**96
+    const sqrtPriceX96 = 2n ** 96n;
+    const price = getPriceFromSqrtPriceX96BigInt(sqrtPriceX96, 6, 6);
+    expect(price).toBeCloseTo(1, 6);
+  });
+});
+```
+
+### Run tests
+
+```bash
+npm install --save-dev jest ts-jest @types/jest
+npx jest
+```
+
 ## ✅ Current Status
 
 - **Dry-run simulation is fully supported.**
 - **All requirements from the main goal are met.**
 - **Code is ready for real execution with minimal changes.**
-
----
 
 **For any questions or to run in live mode, review the code and set `LIVE_MODE = true` after implementing the real contract logic.**

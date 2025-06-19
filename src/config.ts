@@ -26,3 +26,13 @@ export const START_USDC = parseFloat(process.env.START_USDC || "10");
 export const LIVE_MODE = process.env.LIVE_MODE === "true" ? true : false;
 
 export const WALLET_PRIVATE_KEY = process.env.PRIVATE_KEY || "";
+
+export const SLIPPAGE = parseFloat(process.env.SLIPPAGE || "0.001"); // 0.1% default
+export const MIN_AMOUNT_OUT_FACTOR = parseFloat(
+  process.env.MIN_AMOUNT_OUT_FACTOR || "0.995"
+); // 99.5% default
+
+export const POOL_FEES = {
+  PHARAOH: parseFloat(process.env.PHARAOH_POOL_FEE || "0.0005"),
+  SHADOW: parseFloat(process.env.SHADOW_POOL_FEE || "0.0005"),
+};
