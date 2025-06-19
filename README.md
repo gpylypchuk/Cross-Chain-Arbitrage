@@ -25,16 +25,18 @@ This project demonstrates a working cross-chain arbitrage strategy between USDC 
 ## 🔁 Bridging Logic
 
 - **USDC**: Uses Chainlink CCIP to bridge between Avalanche and Sonic. (Currently mocked; stub for real integration provided.)
-- **USDT**: Uses Stargate, chosen for its deep liquidity, low fees, and broad support for both Avalanche and Sonic. Stargate is widely used and reliable for stablecoin transfers, making it the optimal choice for minimizing bridge costs and slippage.
-- **Estimated bridge cost & time**: Simulated in the MVP (default $0.10 and 5–7 seconds, configurable in `config.ts` or via environment variables). Real costs and time depend on network conditions and bridge provider APIs.
+- **USDT**: **Stargate is the chosen bridge for USDT**. Stargate is selected because it offers deep liquidity, low fees, and broad support for both Avalanche and Sonic. It is widely used and reliable for stablecoin transfers, making it the optimal choice for minimizing bridge costs, slippage, and execution risk.
+- **Estimated bridge cost & time (USDT)**: Simulated in the MVP as $0.10 and 5–7 seconds per transfer (configurable in `config.ts` or via environment variables). In production, actual costs and times will depend on Stargate network conditions and fees, but Stargate is known for fast, low-cost stablecoin bridging.
 - **Integration**: Both bridges are modular and can be swapped from mock to real by toggling `LIVE_MODE` and implementing the stubs. The bridging logic is called only if the arbitrage is profitable, and all bridge steps are logged with token, amount, and chain context.
 
-## 📄 Risk Mitigation
+## 📄 Risk Mitigation Strategies
 
 - **No real funds are used in dry-run mode.**
 - **BigNumber math** is used throughout to avoid rounding errors and ensure safety for large capital.
 - **Robust error handling**: All swap and bridge calls are wrapped in try/catch blocks, with clear error logging and defensive execution logic.
-- **Principal loss risk**: In production, use slippage protection, on-chain price checks, and only execute when profit exceeds all costs and risk buffers. Add replay protection, nonce management, and MEV/sandwich attack detection for large capital.
+- **Principal loss risk**: In production, use slippage protection, on-chain price checks, and only execute when profit exceeds all costs and risk buffers.
+- **Replay protection and nonce management**: To be implemented for real execution.
+- **MEV and sandwich attack mitigation**: For large capital, consider using private transaction relays, on-chain price validation, and advanced monitoring.
 
 ## 🧑‍💻 Code Quality & Maintainability
 
