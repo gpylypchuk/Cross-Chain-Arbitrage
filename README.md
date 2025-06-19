@@ -16,11 +16,11 @@ This project demonstrates a working cross-chain arbitrage strategy between USDC 
 - **Runs continuously** in a loop, polling every 10 seconds.
 - **Executes the full round-trip** (mocked or real, depending on `LIVE_MODE`) when profit exceeds a configurable threshold.
 - **Starts with ~$10 USDC** on Avalanche.
-- **Logs all steps**: pool prices, token order, swap/bridge details, net profit/loss, and all costs.
+- **Logs all steps**: pool prices, token order, swap/bridge details, net profit/loss, and all costs, with clear formatting and token context.
 - **Persistent logging**: All arbitrage attempts and executions are logged to `arb-bot.log` with timestamps.
-- **Configurable profit threshold**: Set as a constant; can be set low to force end-to-end simulation.
+- **Configurable profit threshold**: Set as a constant or environment variable; can be set low to force end-to-end simulation.
 - **Bridging logic**: Uses CCIP for USDC and Stargate for USDT (see below).
-- **Switch between dry-run and real execution**: Use the `LIVE_MODE` constant in the code.
+- **Switch between dry-run and real execution**: Use the `LIVE_MODE` constant or environment variable.
 
 ## 🔁 Bridging Logic
 
@@ -33,17 +33,18 @@ This project demonstrates a working cross-chain arbitrage strategy between USDC 
 
 - **No real funds are used in dry-run mode.**
 - **BigNumber math** is used throughout to avoid rounding errors and ensure safety for large capital.
-- **Robust error handling**: All real contract stubs include error handling and comments for retry logic.
+- **Robust error handling**: All swap and bridge calls are wrapped in try/catch blocks, with clear error logging and defensive execution logic.
 - **Principal loss risk**: In production, use slippage protection, on-chain price checks, and only execute when profit exceeds all costs and risk buffers.
 - **Replay protection and nonce management**: To be implemented for real execution.
 
-## 🚀 Next Steps for Production
+## 🧑‍💻 Code Quality & Maintainability
 
-- Implement real contract calls for swaps and bridges (see stubs in code).
-- Fill in real router/bridge addresses for Sonic, CCIP, and Stargate.
-- Add dynamic fee fetching and token symbol resolution.
-- Integrate with a dashboard or webhook for remote monitoring.
-- Add advanced risk controls (e.g., MEV protection, sandwich attack detection).
+- **Clarified profit calculation**: All profit and delta calculations use descriptive variable names and are clearly logged.
+- **Structured return types**: All simulation and execution functions return objects for extensibility and clarity.
+- **Defensive execution**: No swaps or bridges are executed if profit is below the threshold.
+- **Precise, readable logging**: All amounts and profits are formatted for clarity, and logs include token and chain context.
+- **Config-driven**: All addresses, fees, and thresholds are in `src/config.ts` or environment variables for easy management.
+- **Type safety**: Chain names and other enums are strongly typed.
 
 ## ✅ Current Status
 
