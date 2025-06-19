@@ -5,10 +5,15 @@ import axios from "axios";
 import { createPublicClient, http } from "viem";
 import { parseUnits, formatUnits } from "viem/utils";
 import fs from "fs";
-
-// Configurable profit threshold (in USDC)
-const PROFIT_THRESHOLD = 0.01; // Set low to force simulation
-const START_USDC = 10;
+import {
+  ROUTERS,
+  FEES,
+  PROFIT_THRESHOLD,
+  START_USDC,
+  LIVE_MODE,
+  WALLET_PRIVATE_KEY,
+  ChainName,
+} from "./config";
 
 // Uniswap V3 Pool minimal ABI for slot0 and token0/token1
 const UNISWAP_V3_POOL_ABI = [
@@ -84,22 +89,6 @@ const sonicClient = createPublicClient({
   },
   transport: http(),
 });
-
-// --- Arbitrage Simulation Parameters ---
-const PHARAOH_SWAP_FEE = 0.00005; // 0.005% (example, check actual fee)
-const SHADOW_SWAP_FEE = 0.0001; // 0.01% (example, check actual fee)
-const BRIDGE_COST_USDT = 0.1; // $0.10 (example, hardcoded for now)
-const BRIDGE_COST_USDC = 0.1; // $0.10 (example, hardcoded for now)
-
-// --- Config for real contract addresses (testnet/mainnet) ---
-const PHARAOH_ROUTER = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"; // Uniswap Universal Router (Avalanche)
-const SHADOW_ROUTER = "0xUniswapV3RouterAddress"; // TODO: Set real router address for Sonic
-const CCIP_ROUTER = "0xCcipRouterAddress"; // TODO: Set real CCIP router address
-const STARGATE_ROUTER = "0xStargateRouterAddress"; // TODO: Set real Stargate router address
-const WALLET_PRIVATE_KEY = process.env.PRIVATE_KEY || "";
-
-// --- LIVE MODE SWITCH ---
-const LIVE_MODE = false; // Set to true to use real contract calls
 
 // --- BigNumber Math Helpers ---
 function bn(num: number | string, decimals = 6) {
@@ -496,7 +485,7 @@ async function simulateExecution(
       toToken: USDT,
       amountIn: usdc,
       price: pharaoh.price,
-      fee: PHARAOH_SWAP_FEE,
+      fee: FEES.PHARAOH,
     });
     // 2. Bridge USDT to Sonic (Stargate)
     const bridge1 = await mockStargateBridge({
@@ -513,7 +502,7 @@ async function simulateExecution(
       toToken: USDC,
       amountIn: bridge1.amountReceived,
       price: shadow.price,
-      fee: SHADOW_SWAP_FEE,
+      fee: FEES.SHADOW,
     });
     // 4. Bridge USDC back to Avalanche (CCIP)
     const bridge2 = await mockCcipBridge({
@@ -541,7 +530,7 @@ async function simulateExecution(
       toToken: USDC,
       amountIn: usdt,
       price: pharaoh.price,
-      fee: PHARAOH_SWAP_FEE,
+      fee: FEES.PHARAOH,
     });
     // 2. Bridge USDC to Sonic (CCIP)
     const bridge1 = await mockCcipBridge({
@@ -558,7 +547,7 @@ async function simulateExecution(
       toToken: USDT,
       amountIn: bridge1.amountReceived,
       price: shadow.price,
-      fee: SHADOW_SWAP_FEE,
+      fee: FEES.SHADOW,
     });
     // 4. Bridge USDT back to Avalanche (Stargate)
     const bridge2 = await mockStargateBridge({
@@ -592,10 +581,10 @@ async function simulateArbitrage() {
       startAmount: START_USDC,
       poolA: pharaoh,
       poolB: shadow,
-      swapFeeA: PHARAOH_SWAP_FEE,
-      swapFeeB: SHADOW_SWAP_FEE,
-      bridgeCostA: BRIDGE_COST_USDT,
-      bridgeCostB: BRIDGE_COST_USDC,
+      swapFeeA: FEES.PHARAOH,
+      swapFeeB: FEES.SHADOW,
+      bridgeCostA: FEES.BRIDGE_USDT,
+      bridgeCostB: FEES.BRIDGE_USDC,
       directionLabel: "USDC→USDT→USDC",
       tokenIn: USDC,
       tokenOut: USDC,
@@ -606,10 +595,10 @@ async function simulateArbitrage() {
       startAmount: START_USDC,
       poolA: pharaoh,
       poolB: shadow,
-      swapFeeA: PHARAOH_SWAP_FEE,
-      swapFeeB: SHADOW_SWAP_FEE,
-      bridgeCostA: BRIDGE_COST_USDC,
-      bridgeCostB: BRIDGE_COST_USDT,
+      swapFeeA: FEES.PHARAOH,
+      swapFeeB: FEES.SHADOW,
+      bridgeCostA: FEES.BRIDGE_USDC,
+      bridgeCostB: FEES.BRIDGE_USDT,
       directionLabel: "USDT→USDC→USDT",
       tokenIn: USDT,
       tokenOut: USDT,
